@@ -7,6 +7,3 @@
 .#*.scm
 
 .DS_Store
-progress/*
-.claude
-CLAUDE.md
