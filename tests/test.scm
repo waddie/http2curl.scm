@@ -53,7 +53,14 @@
   '("curl -X POST -H \"Authorization: Bearer abc123\" -H \"Content-Type: application/json\" --data-raw '{\"id\":\"42\"}' https://example.com/api/users")
   #f)
 
-;; Test 5: Multiple requests
+;; Test 5: Dependent variables (variables that reference other variables)
+(test-case "Dependent variables"
+  "POST {{baseUrl}}/api/v1/tokenservice.svc/token/ HTTP/1.1\nContent-Type: application/json\n\n{\"test\":\"data\"}"
+  '(("domain" . "https://firstgroup.earcu.com") ("baseUrl" . "{{domain}}/webservices"))
+  '("curl -X POST -H \"Content-Type: application/json\" --data-raw '{\"test\":\"data\"}' https://firstgroup.earcu.com/webservices/api/v1/tokenservice.svc/token/")
+  #f)
+
+;; Test 6: Multiple requests
 (test-case "Multiple requests"
   "GET https://api.example.com/users HTTP/1.1\n\n###\n\nPOST https://api.example.com/users HTTP/1.1\nContent-Type: application/json\n\n{\"name\":\"Jane\"}"
   '()
@@ -61,14 +68,14 @@
     "curl -X POST -H \"Content-Type: application/json\" --data-raw '{\"name\":\"Jane\"}' https://api.example.com/users")
   #f)
 
-;; Test 6: External file reference
+;; Test 7: External file reference
 (test-case "External file body"
   "POST https://api.example.com/upload HTTP/1.1\nContent-Type: application/json\n\n< data.json"
   '()
   '("curl -X POST -H \"Content-Type: application/json\" -d @data.json https://api.example.com/upload")
   #f)
 
-;; Test 7: Request without body
+;; Test 8: Request without body
 (test-case "DELETE without body"
   "DELETE https://api.example.com/users/123 HTTP/1.1\nAuthorization: Bearer token"
   '()

@@ -146,6 +146,28 @@
                           (loop (substring remaining (+ var-end 2))
                                 (string-append result (substring remaining 0 (+ var-end 2)))))))))))))
 
+(define (resolve-variable-values variables)
+  "Recursively resolve variable values that reference other variables.
+   Continues expanding until no more variable references remain or a fixed point is reached.
+   Example: Given ((domain . \"https://example.com\") (baseUrl . \"{{domain}}/api\"))
+            Returns ((domain . \"https://example.com\") (baseUrl . \"https://example.com/api\"))"
+  (let loop ([vars variables]
+             [max-iterations 100]) ; Prevent infinite loops from circular dependencies
+    (if (<= max-iterations 0)
+        ;; Safety limit reached, return current state
+        vars
+        ;; Try to expand all variable values
+        (let ([expanded-vars (map (lambda (var-pair)
+                                    (cons (car var-pair)
+                                          (expand-variable-references (cdr var-pair) vars)))
+                                  vars)])
+          ;; Check if anything changed
+          (if (equal? expanded-vars vars)
+              ;; Fixed point reached, we're done
+              vars
+              ;; Something changed, continue iterating
+              (loop expanded-vars (- max-iterations 1)))))))
+
 ;; ============================================================================
 ;; Request Parsing
 ;; ============================================================================
@@ -257,15 +279,17 @@
          [url (cdr (assoc 'url request))]
          [headers (cdr (assoc 'headers request))]
          [body (cdr (assoc 'body request))]
+         ;; First, resolve any variable interdependencies
+         [resolved-variables (resolve-variable-values variables)]
          ;; Expand URL
-         [expanded-url (expand-variable-references url variables)]
+         [expanded-url (expand-variable-references url resolved-variables)]
          ;; Expand headers
          [expanded-headers (map (lambda (header)
                                   (cons (car header)
-                                        (expand-variable-references (cdr header) variables)))
+                                        (expand-variable-references (cdr header) resolved-variables)))
                                 headers)]
          ;; Expand body
-         [expanded-body (expand-variable-references body variables)])
+         [expanded-body (expand-variable-references body resolved-variables)])
     (list (cons 'method method)
           (cons 'url expanded-url)
           (cons 'headers expanded-headers)
