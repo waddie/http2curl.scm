@@ -54,8 +54,9 @@ Copy `http2curl.scm` to your project directory or Steel load path.
 ## Testing
 
 ```bash
-steel test.scm      # Run comprehensive test suite
-steel validate.scm  # Run validation tests with real endpoints
+steel tests/test.scm                 # Run test suite
+steel tests/test-multi-selection.scm # Run tests for list input
+steel tests/validate.scm             # Run validation tests with real endpoints
 ```
 
 ## License
