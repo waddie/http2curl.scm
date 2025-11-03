@@ -299,6 +299,31 @@
 ;; Curl Command Generation
 ;; ============================================================================
 
+(define (extract-basic-auth headers)
+  "Extract Basic auth credentials from Authorization header.
+   Returns (credentials . remaining-headers) where credentials is #f or \"username:password\"
+   and remaining-headers is the list without the Authorization header"
+  (let loop ([remaining headers]
+             [result '()]
+             [auth-creds #f])
+    (if (null? remaining)
+        (cons auth-creds (reverse result))
+        (let* ([header (car remaining)]
+               [key (car header)]
+               [value (cdr header)])
+          (if (and (string? key) (equal? (string-trim key) "Authorization"))
+              ;; Found Authorization header
+              (let ([trimmed-value (string-trim value)])
+                (if (string-starts-with? trimmed-value "Basic ")
+                    ;; Extract credentials after "Basic "
+                    (let ([creds (string-trim (substring trimmed-value 6))])
+                      ;; Skip this header and save credentials
+                      (loop (cdr remaining) result creds))
+                    ;; Not Basic auth, keep the header
+                    (loop (cdr remaining) (cons header result) auth-creds)))
+              ;; Not Authorization header, keep it
+              (loop (cdr remaining) (cons header result) auth-creds))))))
+
 (define (headers->curl-flags headers)
   "Convert headers alist to list of -H flags"
   (map (lambda (header)
@@ -322,6 +347,10 @@
          [url (cdr (assoc 'url request))]
          [headers (cdr (assoc 'headers request))]
          [body (cdr (assoc 'body request))]
+         ;; Extract Basic auth credentials if present
+         [auth-result (extract-basic-auth headers)]
+         [basic-auth-creds (car auth-result)]
+         [remaining-headers (cdr auth-result)]
          ;; Build command parts
          [parts '("curl")])
     ;; Add method flag (skip if GET)
@@ -332,14 +361,18 @@
       (let ([parts (if include-headers?
                        (append parts (list "-i"))
                        parts)])
-        ;; Add header flags
-        (let ([parts (append parts (headers->curl-flags headers))])
-          ;; Add body flag
-          (let ([parts (append parts (body->curl-flag body))])
-            ;; Add URL (at the end)
-            (let ([parts (append parts (list url))])
-              ;; Join with spaces
-              (string-join parts " "))))))))
+        ;; Add Basic auth flag if present
+        (let ([parts (if basic-auth-creds
+                         (append parts (list (string-append "-u " basic-auth-creds)))
+                         parts)])
+          ;; Add header flags (excluding Authorization if it was Basic auth)
+          (let ([parts (append parts (headers->curl-flags remaining-headers))])
+            ;; Add body flag
+            (let ([parts (append parts (body->curl-flag body))])
+              ;; Add URL (at the end)
+              (let ([parts (append parts (list url))])
+                ;; Join with spaces
+                (string-join parts " ")))))))))
 
 ;; ============================================================================
 ;; Main Entry Point

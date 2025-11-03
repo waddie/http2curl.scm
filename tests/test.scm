@@ -60,6 +60,20 @@
   '("curl -X POST -H \"Content-Type: application/json\" --data-raw '{\"test\":\"data\"}' https://firstgroup.earcu.com/webservices/api/v1/tokenservice.svc/token/")
   #f)
 
+;; Test 5a: Basic authentication with variable substitution
+(test-case "Basic auth with variables"
+  "POST https://api.example.com/login HTTP/1.1\nAuthorization: Basic {{username}}:{{password}}\nContent-Type: application/json\n\n{\"action\":\"login\"}"
+  '(("username" . "john") ("password" . "secret123"))
+  '("curl -X POST -u john:secret123 -H \"Content-Type: application/json\" --data-raw '{\"action\":\"login\"}' https://api.example.com/login")
+  #f)
+
+;; Test 5b: Basic authentication with literal credentials
+(test-case "Basic auth literal"
+  "GET https://api.example.com/protected HTTP/1.1\nAuthorization: Basic admin:pass123"
+  '()
+  '("curl -u admin:pass123 https://api.example.com/protected")
+  #f)
+
 ;; Test 6: Multiple requests
 (test-case "Multiple requests"
   "GET https://api.example.com/users HTTP/1.1\n\n###\n\nPOST https://api.example.com/users HTTP/1.1\nContent-Type: application/json\n\n{\"name\":\"Jane\"}"
