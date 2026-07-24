@@ -1,5 +1,37 @@
 # Changelog
 
+## [Unreleased]
+
+### Changed
+
+- Every value carried over from the request is now single quoted: URL,
+  credentials, header, body, and external file path. Headers were double quoted
+  before, which left `$VAR`, backticks and `$(...)` in a header value live when
+  the command was pasted into a shell. URLs were not quoted at all, so a query
+  string was globbed or split at the `&`
+- Comments (`#`, `//`) between headers are skipped instead of being read as the
+  start of the body, which previously swallowed every header after them
+
+Both change the generated text, so anything comparing output strings needs
+updating:
+
+```scheme
+;; Before
+"curl -H \"Content-Type: application/json\" https://api.example.com/users?page=2"
+;; After
+"curl -H 'Content-Type: application/json' 'https://api.example.com/users?page=2'"
+```
+
+### Removed
+
+- Unused `needs-quoting?`, `double-quote` and `escape-double-quotes` helpers
+
+### Testing
+
+- Test suite ported to [steel-test](https://github.com/waddie/steel-test): the
+  files assert rather than print, and the exit code is the verdict. Run with
+  `sh tests/run-all.sh`
+
 ## [1.1.0] - Multi-Selection Support
 
 ### Added

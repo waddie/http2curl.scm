@@ -15,7 +15,7 @@
 ;;   (http->curl "POST https://api.example.com\nContent-Type: application/json\n\n{\"foo\":\"bar\"}"
 ;;               '((token . "abc123"))
 ;;               #:include-headers? #t)
-;;   => '("curl -X POST -i -H \"Content-Type: application/json\" --data-raw '{\"foo\":\"bar\"}' https://api.example.com")
+;;   => '("curl -X POST -i -H 'Content-Type: application/json' --data-raw '{\"foo\":\"bar\"}' 'https://api.example.com'")
 
 ;; ============================================================================
 ;; String Utilities
@@ -74,44 +74,16 @@
                              (list c)))
                        chars))))))
 
-(define (needs-quoting? str)
-  "Check if string needs quoting for shell"
-  (and (string? str)
-    (or (string-contains? str " ")
-      (string-contains? str "\t")
-      (string-contains? str "&")
-      (string-contains? str "|")
-      (string-contains? str ";")
-      (string-contains? str "<")
-      (string-contains? str ">")
-      (string-contains? str "(")
-      (string-contains? str ")")
-      (string-contains? str "$")
-      (string-contains? str "`")
-      (string-contains? str "\\"))))
-
+;; Every value carried over from the request (url, header, credentials, body,
+;; file path) is single quoted. Single quotes are the only shell quoting that
+;; suppresses globbing, parameter expansion and command substitution alike, so
+;; the value survives being pasted into a shell intact. The method is left bare:
+;; it is a single whitespace-delimited token from the request line.
 (define (shell-quote str)
   "Quote string for safe shell usage with single quotes"
   (if (not (string? str))
     "''"
     (string-append "'" (escape-single-quotes str) "'")))
-
-(define (escape-double-quotes str)
-  "Escape double quotes and backslashes for use inside double quotes"
-  (if (not (string? str))
-    ""
-    (let ([chars (string->list str)])
-      (list->string (apply append
-                     (map (lambda (c)
-                           (cond
-                             [(eq? c #\") (string->list "\\\"")]
-                             [(eq? c #\\) (string->list "\\\\")]
-                             [else (list c)]))
-                       chars))))))
-
-(define (double-quote str)
-  "Wrap string in double quotes with proper escaping"
-  (string-append "\"" (escape-double-quotes str) "\""))
 
 ;; ============================================================================
 ;; Variable Expansion
@@ -202,6 +174,12 @@
       (cons (substring str 0 pos) (substring str (+ pos (string-length delimiter))))
       #f)))
 
+(define (comment-line? line)
+  "Check if line is a comment. ### separators are consumed by parse-requests
+   before this runs, so a leading # is always a comment here"
+  (let ([trimmed (string-trim line)])
+    (or (string-starts-with? trimmed "#") (string-starts-with? trimmed "//"))))
+
 (define (parse-request-line line)
   "Parse 'METHOD URL HTTP/1.1' into (method . url), handles optional HTTP version"
   (let* ([trimmed (string-trim line)]
@@ -228,18 +206,21 @@
           ;; Already in body, collect all remaining lines
           (loop (cdr remaining) headers #t (cons line body-lines))
           ;; Still in headers section
-          (if (string-empty? line)
+          (cond
             ;; Blank line marks start of body
-            (loop (cdr remaining) headers #t body-lines)
+            [(string-empty? line) (loop (cdr remaining) headers #t body-lines)]
+            ;; Comment between headers, skip it
+            [(comment-line? line) (loop (cdr remaining) headers #f body-lines)]
             ;; Parse as header
-            (let ([split (split-first line ":")])
-              (if split
-                ;; Valid header
-                (let ([key (string-trim (car split))]
-                      [value (string-trim (cdr split))])
-                  (loop (cdr remaining) (cons (cons key value) headers) #f body-lines))
-                ;; Not a valid header, treat as body start
-                (loop (cdr remaining) headers #t (cons line body-lines))))))))))
+            [else
+              (let ([split (split-first line ":")])
+                (if split
+                  ;; Valid header
+                  (let ([key (string-trim (car split))]
+                        [value (string-trim (cdr split))])
+                    (loop (cdr remaining) (cons (cons key value) headers) #f body-lines))
+                  ;; Not a valid header, treat as body start
+                  (loop (cdr remaining) headers #t (cons line body-lines))))]))))))
 
 (define (parse-single-request request-string)
   "Parse a single .http request into structured data
@@ -251,9 +232,7 @@
         ;; Empty request
         (list (cons 'method "GET") (cons 'url "") (cons 'headers '()) (cons 'body ""))
         (let ([line (car remaining)])
-          (if (or (string-empty? line)
-               (string-starts-with? (string-trim line) "#")
-               (string-starts-with? (string-trim line) "//"))
+          (if (or (string-empty? line) (comment-line? line))
             ;; Skip this line and continue
             (loop (cdr remaining))
             ;; Found first non-empty, non-comment line - this is the request line
@@ -327,7 +306,7 @@
 (define (headers->curl-flags headers)
   "Convert headers alist to list of -H flags"
   (map (lambda (header)
-        (string-append "-H " (double-quote (string-append (car header) ": " (cdr header)))))
+        (string-append "-H " (shell-quote (string-append (car header) ": " (cdr header)))))
     headers))
 
 (define (body->curl-flag body)
@@ -337,7 +316,7 @@
     ;; Check for external file reference: < filepath
     [(string-starts-with? (string-trim body) "<")
       (let ([filepath (string-trim (substring (string-trim body) 1))])
-        (list (string-append "-d @" (string-trim filepath))))]
+        (list (string-append "-d " (shell-quote (string-append "@" filepath)))))]
     ;; Regular body data
     [else (list (string-append "--data-raw " (shell-quote body)))]))
 
@@ -363,14 +342,14 @@
                     parts)])
         ;; Add Basic auth flag if present
         (let ([parts (if basic-auth-creds
-                      (append parts (list (string-append "-u " basic-auth-creds)))
+                      (append parts (list (string-append "-u " (shell-quote basic-auth-creds))))
                       parts)])
           ;; Add header flags (excluding Authorization if it was Basic auth)
           (let ([parts (append parts (headers->curl-flags remaining-headers))])
             ;; Add body flag
             (let ([parts (append parts (body->curl-flag body))])
               ;; Add URL (at the end)
-              (let ([parts (append parts (list url))])
+              (let ([parts (append parts (list (shell-quote url)))])
                 ;; Join with spaces
                 (string-join parts " ")))))))))
 

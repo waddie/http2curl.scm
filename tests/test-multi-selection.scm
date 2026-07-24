@@ -1,145 +1,84 @@
-#!/usr/bin/env steel
-
-;; Test file for multi-selection (list input) functionality
-;;
 ;; SPDX-License-Identifier: MIT
-;; Copyright (c) 2025 Tom Waddington
+;; Copyright (c) 2025, 2026 Tom Waddington
 
+;;; test-multi-selection.scm - list input, as produced by Helix
+;;; multi-selections. Results from every selection land in one flat list.
+;;;
+;;; Run from the repo root: steel tests/test-multi-selection.scm
+
+(require "steel-test/test.scm")
 (require "../http2curl.scm")
 
-(define (test-case name
-          input
-          variables
-          expected
-          include-headers?)
-  (displayln (string-append "\n=== Test: " name " ==="))
-  (displayln "Input type:")
-  (displayln (if (string? input) "  Single string" "  List of strings"))
-  (when (list? input)
-    (displayln (string-append "  Number of selections: " (int->string (length input))))
-    (displayln "  Selections:"))
-  (if (list? input)
-      (for-each
-       (lambda (s)
-         (displayln (string-append "    - " (substring s 0 (min 50 (string-length s))) "...")))
-       input)
-      (displayln (string-append "  " (substring input 0 (min 50 (string-length input))) "...")))
+(deftest list-input
+  (testing "a single-element list matches the string form"
+    (is (= (http->curl "GET https://api.example.com/users HTTP/1.1" '())
+         (http->curl '("GET https://api.example.com/users HTTP/1.1") '()))))
+  (testing "one command per selection, in order"
+    (is (= '("curl 'https://api.example.com/users'"
+             "curl 'https://api.example.com/posts'"
+             "curl 'https://api.example.com/comments'")
+         (http->curl '("GET https://api.example.com/users HTTP/1.1"
+                       "GET https://api.example.com/posts HTTP/1.1"
+                       "GET https://api.example.com/comments HTTP/1.1")
+           '()))))
+  (testing "selections may differ in method, headers and body"
+    (is (= '("curl -H 'Authorization: Bearer token1' 'https://api.example.com/users'"
+             "curl -X POST -H 'Content-Type: application/json' --data-raw '{\"title\":\"Post 1\"}' 'https://api.example.com/posts'")
+         (http->curl
+           '("GET https://api.example.com/users HTTP/1.1\nAuthorization: Bearer token1"
+             "POST https://api.example.com/posts HTTP/1.1\nContent-Type: application/json\n\n{\"title\":\"Post 1\"}")
+           '()))))
+  (testing "empty selections are dropped"
+    (is (= '("curl 'https://api.example.com/users'" "curl 'https://api.example.com/posts'")
+         (http->curl '("GET https://api.example.com/users HTTP/1.1"
+                       ""
+                       "GET https://api.example.com/posts HTTP/1.1")
+           '())))))
 
-  (displayln "\nVariables:")
-  (displayln variables)
-  (displayln (string-append "\nInclude headers: " (if include-headers? "true" "false")))
-  (displayln "\nResult:")
-  (let ([result (http->curl input variables #:include-headers? include-headers?)])
-    (for-each (lambda (cmd) (displayln (string-append "  " cmd))) result)
-    (displayln "\nExpected:")
-    (for-each (lambda (cmd) (displayln (string-append "  " cmd))) expected)
-    (displayln "---")))
+(deftest flattening
+  (testing "a selection holding ### separators contributes every request"
+    (is (= '("curl 'https://api.example.com/users'"
+             "curl -X POST -H 'Content-Type: application/json' --data-raw '{\"name\":\"Alice\"}' 'https://api.example.com/users'"
+             "curl 'https://api.example.com/posts'"
+             "curl -X DELETE 'https://api.example.com/posts/123'")
+         (http->curl
+           '("GET https://api.example.com/users HTTP/1.1\n\n###\n\nPOST https://api.example.com/users HTTP/1.1\nContent-Type: application/json\n\n{\"name\":\"Alice\"}"
+             "GET https://api.example.com/posts HTTP/1.1\n\n###\n\nDELETE https://api.example.com/posts/123 HTTP/1.1")
+           '())))))
 
-;; Test 1: List with single selection (should behave like string input)
-(test-case "List with single selection"
-  '("GET https://api.example.com/users HTTP/1.1")
-  '()
-  '("curl https://api.example.com/users")
-  #f)
+(deftest shared-options
+  (testing "one variable map serves every selection"
+    (is (= '("curl -H 'Authorization: Bearer abc123' 'https://example.com/api/v1/users'"
+             "curl -H 'Authorization: Bearer abc123' 'https://example.com/api/v1/posts'")
+         (http->curl '("GET {{baseUrl}}/api/v1/users HTTP/1.1\nAuthorization: Bearer {{token}}"
+                       "GET {{baseUrl}}/api/v1/posts HTTP/1.1\nAuthorization: Bearer {{token}}")
+           '(("baseUrl" . "https://example.com") ("token" . "abc123"))))))
+  (testing "include-headers applies to every selection"
+    (is (= '("curl -i 'https://api.example.com/status'" "curl -i 'https://api.example.com/health'")
+         (http->curl '("GET https://api.example.com/status HTTP/1.1"
+                       "GET https://api.example.com/health HTTP/1.1")
+           '()
+           #:include-headers?
+           #t)))))
 
-;; Test 2: List with multiple separate GET requests
-(test-case "Multiple selections - separate GET requests"
-  '("GET https://api.example.com/users HTTP/1.1" "GET https://api.example.com/posts HTTP/1.1"
-                                                 "GET https://api.example.com/comments HTTP/1.1")
-  '()
-  '("curl https://api.example.com/users" "curl https://api.example.com/posts"
-                                         "curl https://api.example.com/comments")
-  #f)
+;; Three request blocks selected in an .http file, each with its own leading
+;; separator and comment line.
+(deftest helix-selection-blocks
+  (testing "comments and separators inside selections"
+    (is (= '("curl -i -H 'Accept: application/json' -H 'Authorization: Bearer eyJhbGc...' 'https://api.example.com/api/v1/users/12345'"
+             "curl -X PUT -i -H 'Content-Type: application/json' -H 'Authorization: Bearer eyJhbGc...' --data-raw '{\n  \"name\": \"John Doe\",\n  \"email\": \"john@example.com\"\n}' 'https://api.example.com/api/v1/users/12345'"
+             "curl -X DELETE -i -H 'Authorization: Bearer eyJhbGc...' 'https://api.example.com/api/v1/sessions/sess-abc-123'")
+         (http->curl
+           '("###\n# Get user profile\nGET {{baseUrl}}/api/v1/users/{{userId}} HTTP/1.1\nAccept: application/json\nAuthorization: Bearer {{token}}"
+             "###\n# Update user\nPUT {{baseUrl}}/api/v1/users/{{userId}} HTTP/1.1\nContent-Type: application/json\nAuthorization: Bearer {{token}}\n\n{\n  \"name\": \"{{userName}}\",\n  \"email\": \"{{userEmail}}\"\n}"
+             "###\n# Delete user session\nDELETE {{baseUrl}}/api/v1/sessions/{{sessionId}} HTTP/1.1\nAuthorization: Bearer {{token}}")
+           '(("baseUrl" . "https://api.example.com")
+             ("userId" . "12345")
+             ("token" . "eyJhbGc...")
+             ("userName" . "John Doe")
+             ("userEmail" . "john@example.com")
+             ("sessionId" . "sess-abc-123"))
+           #:include-headers?
+           #t)))))
 
-;; Test 3: List with mixed request types and headers
-(test-case "Multiple selections - mixed requests with headers"
-  '("GET https://api.example.com/users HTTP/1.1\nAuthorization: Bearer token1"
-    "POST https://api.example.com/posts HTTP/1.1\nContent-Type: application/json\n\n{\"title\":\"Post 1\"}")
-  '()
-  '("curl -H \"Authorization: Bearer token1\" https://api.example.com/users"
-    "curl -X POST -H \"Content-Type: application/json\" --data-raw '{\"title\":\"Post 1\"}' https://api.example.com/posts")
-  #f)
-
-;; Test 4: List where each selection has multiple requests (### separated)
-(test-case "Multiple selections with ### separators"
-  '("GET https://api.example.com/users HTTP/1.1\n\n###\n\nPOST https://api.example.com/users HTTP/1.1\nContent-Type: application/json\n\n{\"name\":\"Alice\"}"
-    "GET https://api.example.com/posts HTTP/1.1\n\n###\n\nDELETE https://api.example.com/posts/123 HTTP/1.1")
-  '()
-  '("curl https://api.example.com/users"
-    "curl -X POST -H \"Content-Type: application/json\" --data-raw '{\"name\":\"Alice\"}' https://api.example.com/users"
-    "curl https://api.example.com/posts"
-    "curl -X DELETE https://api.example.com/posts/123")
-  #f)
-
-;; Test 5: List with variable substitution
-(test-case "Multiple selections with variable substitution"
-  '("GET {{baseUrl}}/api/v1/users HTTP/1.1\nAuthorization: Bearer {{token}}"
-    "GET {{baseUrl}}/api/v1/posts HTTP/1.1\nAuthorization: Bearer {{token}}"
-    "GET {{baseUrl}}/api/v1/comments HTTP/1.1\nAuthorization: Bearer {{token}}")
-  '(("baseUrl" . "https://example.com") ("token" . "abc123"))
-  '("curl -H \"Authorization: Bearer abc123\" https://example.com/api/v1/users"
-    "curl -H \"Authorization: Bearer abc123\" https://example.com/api/v1/posts"
-    "curl -H \"Authorization: Bearer abc123\" https://example.com/api/v1/comments")
-  #f)
-
-;; Test 6: List with include-headers flag
-(test-case "Multiple selections with include-headers"
-  '("GET https://api.example.com/status HTTP/1.1" "GET https://api.example.com/health HTTP/1.1")
-  '()
-  '("curl -i https://api.example.com/status" "curl -i https://api.example.com/health")
-  #t)
-
-;; Test 7: Mixed - some selections with empty requests
-(test-case "Multiple selections with some empty"
-  '("GET https://api.example.com/users HTTP/1.1" "" "GET https://api.example.com/posts HTTP/1.1")
-  '()
-  '("curl https://api.example.com/users" "curl https://api.example.com/posts")
-  #f)
-
-;; Test 8: Realistic Helix multi-selection scenario
-(displayln "\n\n=== Realistic Helix Multi-Selection Scenario ===")
-(displayln "Scenario: User selected 3 different API endpoints in an .http file")
-(displayln "Each selection is a complete request block\n")
-
-(define helix-selections
-  '("###
-# Get user profile
-GET {{baseUrl}}/api/v1/users/{{userId}} HTTP/1.1
-Accept: application/json
-Authorization: Bearer {{token}}"
-    "###
-# Update user
-PUT {{baseUrl}}/api/v1/users/{{userId}} HTTP/1.1
-Content-Type: application/json
-Authorization: Bearer {{token}}
-
-{
-  \"name\": \"{{userName}}\",
-  \"email\": \"{{userEmail}}\"
-}"
-    "###
-# Delete user session
-DELETE {{baseUrl}}/api/v1/sessions/{{sessionId}} HTTP/1.1
-Authorization: Bearer {{token}}"))
-
-(define helix-vars
-  '(("baseUrl" . "https://api.example.com") ("userId" . "12345")
-                                            ("token" . "eyJhbGc...")
-                                            ("userName" . "John Doe")
-                                            ("userEmail" . "john@example.com")
-                                            ("sessionId" . "sess-abc-123")))
-
-(displayln "Input: 3 selections from Helix editor")
-(for-each
- (lambda (sel)
-   (displayln (string-append "\nSelection:\n" (substring sel 0 (min 100 (string-length sel))) "...")))
- helix-selections)
-
-(displayln "\n\nGenerated curl commands:")
-(let ([commands (http->curl helix-selections helix-vars #:include-headers? #t)])
-  (for-each (lambda (cmd)
-              (displayln "")
-              (displayln cmd))
-            commands))
-
-(displayln "\n\n=== All multi-selection tests completed ===")
+(run-tests!)

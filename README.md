@@ -22,7 +22,7 @@ A Steel Scheme library that translates http format requests into curl commands.
 
 ;; Simple GET request
 (http->curl "GET https://api.example.com/users HTTP/1.1" '())
-;; => ("curl https://api.example.com/users")
+;; => ("curl 'https://api.example.com/users'")
 
 ;; POST with JSON and variables
 (http->curl
@@ -32,7 +32,7 @@ Content-Type: application/json
 {\"name\":\"{{userName}}\"}"
   '(("baseUrl" . "https://api.example.com")
     ("userName" . "John Doe")))
-;; => ("curl -X POST -H \"Content-Type: application/json\" --data-raw '{\"name\":\"John Doe\"}' https://api.example.com/users")
+;; => ("curl -X POST -H 'Content-Type: application/json' --data-raw '{\"name\":\"John Doe\"}' 'https://api.example.com/users'")
 
 ;; Multi-selection (Helix editor)
 (http->curl
@@ -40,9 +40,9 @@ Content-Type: application/json
     "GET https://api.example.com/posts HTTP/1.1"
     "GET https://api.example.com/comments HTTP/1.1")
   '())
-;; => ("curl https://api.example.com/users"
-;;     "curl https://api.example.com/posts"
-;;     "curl https://api.example.com/comments")
+;; => ("curl 'https://api.example.com/users'"
+;;     "curl 'https://api.example.com/posts'"
+;;     "curl 'https://api.example.com/comments'")
 ```
 
 See [USAGE.md](USAGE.md) for complete documentation and examples.
@@ -53,10 +53,16 @@ Copy `http2curl.scm` to your project directory or Steel load path.
 
 ## Testing
 
+The suite uses [steel-test](https://github.com/waddie/steel-test), which must be
+installed first:
+
 ```bash
-steel tests/test.scm                 # Run test suite
-steel tests/test-multi-selection.scm # Run tests for list input
-steel tests/validate.scm             # Run validation tests with real endpoints
+forge pkg install --git https://github.com/waddie/steel-test
+```
+
+```bash
+sh tests/run-all.sh          # Whole suite
+steel tests/test-parsing.scm # One file; exit code is the verdict
 ```
 
 ## License

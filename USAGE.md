@@ -15,7 +15,7 @@ Simply copy `http2curl.scm` to your project directory or include it in your Stee
 
 ;; Simple GET request
 (http->curl "GET https://api.example.com/users HTTP/1.1" '())
-;; => ("curl https://api.example.com/users")
+;; => ("curl 'https://api.example.com/users'")
 
 ;; POST with headers and JSON body
 (http->curl
@@ -25,7 +25,7 @@ Authorization: Bearer token123
 
 {\"name\":\"John\",\"email\":\"john@example.com\"}"
   '())
-;; => ("curl -X POST -H \"Content-Type: application/json\" -H \"Authorization: Bearer token123\" --data-raw '{\"name\":\"John\",\"email\":\"john@example.com\"}' https://api.example.com/users")
+;; => ("curl -X POST -H 'Content-Type: application/json' -H 'Authorization: Bearer token123' --data-raw '{\"name\":\"John\",\"email\":\"john@example.com\"}' 'https://api.example.com/users'")
 ```
 
 ## Function Signature
@@ -60,7 +60,7 @@ Authorization: Bearer {{token}}
                ("token" . "abc123xyz")))
 
 (http->curl http-request vars)
-;; => ("curl -H \"Authorization: Bearer abc123xyz\" https://example.com/api/users")
+;; => ("curl -H 'Authorization: Bearer abc123xyz' 'https://example.com/api/users'")
 ```
 
 ## Multiple Requests
@@ -81,8 +81,8 @@ Content-Type: application/json
 {\"name\":\"Jane\"}")
 
 (http->curl multi-request '())
-;; => ("curl https://api.example.com/users"
-;;     "curl -X POST -H \"Content-Type: application/json\" --data-raw '{\"name\":\"Jane\"}' https://api.example.com/users")
+;; => ("curl 'https://api.example.com/users'"
+;;     "curl -X POST -H 'Content-Type: application/json' --data-raw '{\"name\":\"Jane\"}' 'https://api.example.com/users'")
 ```
 
 ### Multi-Selection (Helix Editor)
@@ -109,9 +109,9 @@ Authorization: Bearer {{token}}"))
                ("sessionId" . "sess-xyz")))
 
 (http->curl selections vars)
-;; => ("curl -H \"Authorization: Bearer abc123\" https://api.example.com/users/12345"
-;;     "curl -X PUT -H \"Content-Type: application/json\" --data-raw '{\"name\":\"John\"}' https://api.example.com/users/12345"
-;;     "curl -X DELETE -H \"Authorization: Bearer abc123\" https://api.example.com/sessions/sess-xyz")
+;; => ("curl -H 'Authorization: Bearer abc123' 'https://api.example.com/users/12345'"
+;;     "curl -X PUT -H 'Content-Type: application/json' --data-raw '{\"name\":\"John\"}' 'https://api.example.com/users/12345'"
+;;     "curl -X DELETE -H 'Authorization: Bearer abc123' 'https://api.example.com/sessions/sess-xyz'")
 ```
 
 Each selection can also contain multiple requests with `###` separators, and all will be processed into a single flat list.
@@ -122,7 +122,7 @@ Use the `#:include-headers?` parameter to add the `-i` flag:
 
 ```scheme
 (http->curl "GET https://api.example.com/status HTTP/1.1" '() #:include-headers? #t)
-;; => ("curl -i https://api.example.com/status")
+;; => ("curl -i 'https://api.example.com/status'")
 ```
 
 ## External File References
@@ -135,7 +135,7 @@ POST https://api.example.com/upload HTTP/1.1
 Content-Type: application/json
 
 < data.json" '())
-;; => ("curl -X POST -H \"Content-Type: application/json\" -d @data.json https://api.example.com/upload")
+;; => ("curl -X POST -H 'Content-Type: application/json' -d '@data.json' 'https://api.example.com/upload'")
 ```
 
 ## Complete Example
@@ -191,10 +191,20 @@ Authorization: Bearer {{token}}
 - Include response headers option (`-i` flag)
 - Proper shell escaping for special characters
 
+## Shell Quoting
+
+Every value taken from the request (URL, header, credentials, body, file path)
+is single quoted, and any single quote inside it is escaped as `'\''`. Single
+quotes are what stop the shell rewriting the value: a URL keeps its `?` and `&`
+instead of being globbed or split, and a header holding `$TOKEN` or a backtick
+reaches curl as written. Only the method is left bare.
+
 ## Notes
 
 - Empty requests (no URL) are automatically filtered out
 - HTTP version (e.g., `HTTP/1.1`) is optional and ignored
-- Comments starting with `#` or `//` are skipped
+- Comments starting with `#` or `//` are skipped, both before the request line
+  and between headers. Once the blank line before the body has been seen, every
+  line is body data
 - The library does not execute curl commands, only generates them
 - Variable definitions (`@varName = value`) in http files are NOT parsed; variables must be passed as the second parameter
