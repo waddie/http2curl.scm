@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [0.3.0]
 
 ### Changed
 
@@ -32,7 +32,7 @@ updating:
   files assert rather than print, and the exit code is the verdict. Run with
   `sh tests/run-all.sh`
 
-## [1.1.0] - Multi-Selection Support
+## [0.2.0] - Multi-Selection Support
 
 ### Added
 
@@ -76,7 +76,7 @@ updating:
 
 Fully backward compatible - all existing code using string input continues to work
 
-## [1.0.0] - Initial Release
+## [0.1.0] - Initial Release
 
 ### Features
 
